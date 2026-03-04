@@ -125,7 +125,7 @@ class RVXInstJ<
     let Inst{6-0} = opcode;
 }
 
-class TOYRISCVInstU<
+class RVXInstU<
     bits<7> opcode, dag outs, dag ins, 
     string asmstr, list<dag> pattern, 
     InstrItinClass itin>
