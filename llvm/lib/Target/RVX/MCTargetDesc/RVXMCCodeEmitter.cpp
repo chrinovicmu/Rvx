@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <llvm-14/llvm/ADT/SmallVector.h>
 #include <llvm-14/llvm/ADT/Twine.h>
+#include <llvm-14/llvm/MC/MCCodeEmitter.h>
 #include <llvm-14/llvm/MC/MCInstPrinter.h>
 #include <llvm-14/llvm/MC/MCInstrDesc.h>
 
@@ -49,7 +50,7 @@ void RVXMCCodeEmitter::encodeInstruction(const MCInst &Inst,
 
     if(Size == 4)
     {
-        support::endian::write<uint32_t>(OS, static_casr<uint32_t>(Binary), 
+        support::endian::write<uint32_t>(OS, static_cast<uint32_t>(Binary), 
                                          llvm::endianness::little); 
     }
 }
@@ -182,6 +183,100 @@ uint64_t RVXMCCodeEmitter::getImmOpValueHi20(const MCInst &MI, unsigned OpNo,
     return 0;
 }
 
+uint64_t RVXMCCodeEmitter::getImmOpValueLo12I(const MCInst &MI, unsigned OpNo,
+                                      SmallVectorImpl<MCFixup> &Fixups,
+                                      const MCSubtargetInfo &STI) const {
+ 
+    const MCOperand &MO = MI.getOperand(OpNo);
 
+    if (MO.isImm()) {
+        // Extract and return the low 12 bits as a signed value.
+        // We sign-extend from bit 11 by casting through int12 — we do this
+        // with a manual shift because C++ has no int12_t type.
+        int64_t Value = MO.getImm();
+        // Sign extend from bit 11: shift left so bit 11 is the MSB, then
+        // arithmetic shift right to propagate the sign.
+        int64_t SignExt = (Value << 52) >> 52;
+        return static_cast<uint64_t>(SignExt) & 0xFFF;
+    }
 
+    assert(MO.isExpr());
+    MCFixupKind Kind = MCFixupKind(RVX::fixup_rvx_lo12_i);
+    Fixups.push_back(MCFixup::create(0, MO.getExpr(), Kind, MI.getLoc()));
+    return 0;
+}
+
+uint64_t RVXMCCodeEmitter::getImmOpValueLo12S(const MCInst &MI, unsigned OpNo,
+                                      SmallVectorImpl<MCFixup> &Fixups,
+                                      const MCSubtargetInfo &STI) const {
+    
+    const MCOperand &MO = MI.getOperand(OpNo);
+
+    if (MO.isImm()) {
+        int64_t Value = MO.getImm();
+        int64_t SignExt = (Value << 52) >> 52;
+        return static_cast<uint64_t>(SignExt) & 0xFFF;
+    }
+
+    assert(MO.isExpr());
+    MCFixupKind Kind = MCFixupKind(RVX::fixup_rvx_lo12_s);
+    Fixups.push_back(MCFixup::create(0, MO.getExpr(), Kind, MI.getLoc()));
+    return 0;
+}
+
+uint64_t RVXMCCodeEmitter::getJALTargetEncoding(const MCInst &MI, unsigned OpNo,
+                                        SmallVectorImpl<MCFixup> &Fixups,
+                                        const MCSubtargetInfo &STI) const {
+    
+    const MCOperand &MO = MI.getOperand(OpNo);
+
+    if (MO.isImm()) {
+        int64_t Value = MO.getImm();
+
+        // JAL targets must be 2-byte aligned (bit 0 = 0).
+        if (Value & 1) {
+            Ctx.reportError(MI.getLoc(),
+                      "JAL target offset " + Twine(Value) +
+                      " is not 2-byte aligned");
+            return 0;
+        }
+
+     // 21-bit signed range: [-(2^20), (2^20 - 2)] = [-1048576, 1048574]
+    if (Value < -1048576 || Value > 1048574) {
+        Ctx.reportError(MI.getLoc(),
+                      "JAL offset " + Twine(Value) +
+                      " out of range [-1048576, 1048574]");
+        return 0;
+        }
+
+    // Shift right by 1 to remove the implicit 0 LSB.
+    // The 20 meaningful bits [20:1] are returned right-justified.
+    return (static_cast<uint64_t>(Value) >> 1) & 0xFFFFF;
+  }
+
+  assert(MO.isExpr());
+  MCFixupKind Kind = MCFixupKind(RVX::fixup_rvx_jal_20);
+  Fixups.push_back(MCFixup::create(0, MO.getExpr(), Kind, MI.getLoc()));
+  return 0;
+}
+
+uint64_t RVXMCCodeEmitter::getFenceArgOpValue(const MCInst &MI, unsigned OpNo,
+                                               SmallVectorImpl<MCFixup> &Fixups,
+                                               const MCSubtargetInfo &STI) const {
+    const MCOperand &MO = MI.getOperand(OpNo);
+  
+    assert(MO.isImm() &&
+         "getFenceArgOpValue: fence pred/succ operand is not an immediate. "
+         "parseFenceArg() should have converted the string to an integer "
+         "bitmask before storing it in the MCInst.");
+
+     return MO.getImm() & 0xF;
+}
+
+namespace llvm{
+MCCodeEmitter *createRVXMCCodeEmitter(const MCInstInfo &MCII, 
+                                      MCContext &Ctx) {
+    return new RVXMCCodeEmitter(MCII, Ctx); 
+}
+}
 
