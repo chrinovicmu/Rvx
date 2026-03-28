@@ -10,6 +10,7 @@
 #include <llvm-14/llvm/ADT/ArrayRef.h>
 #include <llvm-14/llvm/MC/MCFixup.h>
 #include <llvm-14/llvm/MC/MCInst.h>
+#include <memory>
 
 
 namespace  llvm{
@@ -23,7 +24,10 @@ class RVXAsmBackend : public MCAsmBackend{
 
     const MCSubtargetInfo &STI; 
 
-    const MCTargetOptions &TargetOptions; 
+    const MCTargetOptions &TargetOptions;
+
+    uint8_t OSABI; 
+    bool is64bIT; 
 
 public:
 
@@ -34,29 +38,29 @@ public:
                     const MCValue &Target, MutableArrayRef<char> Data,
                     uint64_t Value, bool IsResolved, 
                     const MCSubtargetInfo *STI) const override; 
-    
+
+    /*called once by the MCObjecStreamer when it needs to write the object file */ 
+    std::unique_ptr<MCObjectTargetWriter>
+        createObjectTargetWriter() const override; 
+
+    /*return MCFixupKindInfo metadata for a given fixup kind */ 
     const MCFixupKindInfo &getFixupKindInfo(MCFixupKind Kind) const override; 
 
+    /*return number of target specific fixup kinds*/ 
     unsigned getNumFixupKinds() const override{
-        return RVX::NumTargetFixupKinds;
+        return RVX::NumTargetFixupKinds; 
     }
 
-    bool mayNeedRelaxation(const MCInst &Inst, 
-                           const MCSubtargetInfo &STI) const override; 
-
-    void relaxInstruction(MCInst &Inst, 
-                          const MCSubtargetInfo &STI) const override; 
-
-    bool shouldForceRelocation(const MCAssembler &Asm, const MCFixup &Fixup,
-                             const MCValue &Target,
-                             const MCSubtargetInfo *STI) override;
+    bool mayNeedRelaxation(const MCInst &Inst,
+                         const MCSubtargetInfo &STI) const override;
 
 
-    bool writeNopData(raw_ostream &OS, uint64_t Count,
-                    const MCSubtargetInfo *STI) const override;
-    
-    std::unique_ptr<MCObjectTargetWriter>
-    createObjectTargetWriter() const override;
+    bool fixupNeedsRelaxation(const MCFixup &Fixup, uint64_t Value,
+                             const MCRelaxableFragment *DF,
+                             const MCAsmLayout &Layout) const override;
+
+    void relaxInstruction(MCInst &Inst,
+                        const MCSubtargetInfo &STI) const override;
 }
 }
 
